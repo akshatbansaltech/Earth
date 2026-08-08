@@ -28,19 +28,62 @@ const names = [
   'earth_normal_2048.jpg',
   'moon_1024.jpg',
 ]
+
+let started = false
+let remaining = names.length
+function startScene() {
+  if (started) return
+  started = true
+  loaderEl.classList.add('hidden')
+  animate()
+}
+
 manager.onProgress = (url, loaded, total) => {
   loaderFill.style.width = `${(loaded / total) * 100}%`
   loaderStatus.textContent = `loading ${url.split('/').pop()}`
 }
 manager.onLoad = () => {
-  loaderEl.classList.add('hidden')
-  animate()
+  remaining = 0
+  startScene()
 }
 manager.onError = (url) => {
-  loaderStatus.textContent = `failed to load ${url}`
+  remaining--
+  loaderStatus.textContent = `swapping ${url.split('/').pop()} for fallback`
+  if (remaining <= 0) startScene()
+}
+setTimeout(startScene, 15000)
+
+function fallbackTexture(colorA, colorB) {
+  const c = document.createElement('canvas')
+  c.width = c.height = 256
+  const ctx = c.getContext('2d')
+  const g = ctx.createRadialGradient(128, 128, 20, 128, 128, 128)
+  g.addColorStop(0, colorA)
+  g.addColorStop(1, colorB)
+  ctx.fillStyle = g
+  ctx.fillRect(0, 0, 256, 256)
+  for (let i = 0; i < 900; i++) {
+    ctx.fillStyle = `rgba(255,255,255,${Math.random() * 0.08})`
+    ctx.fillRect(Math.random() * 256, Math.random() * 256, 2, 2)
+  }
+  const t = new THREE.CanvasTexture(c)
+  t.colorSpace = THREE.SRGBColorSpace
+  return t
 }
 
-for (const n of names) textures[n.split('.')[0]] = texLoader.load(`${BASE}textures/${n}`)
+for (const n of names) {
+  const key = n.split('.')[0]
+  textures[key] = texLoader.load(
+    `${BASE}textures/${n}`,
+    (t) => {
+      if (key !== 'earth_normal_2048' && key !== 'earth_specular_2048') t.colorSpace = THREE.SRGBColorSpace
+    },
+    undefined,
+    () => {
+      textures[key] = fallbackTexture('#2f6fd8', '#0b1d3d')
+    }
+  )
+}
 
 /* ---------------- renderer / scene / camera ---------------- */
 
@@ -50,18 +93,18 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
 renderer.setSize(window.innerWidth, window.innerHeight)
 renderer.outputColorSpace = THREE.SRGBColorSpace
 renderer.toneMapping = THREE.ACESFilmicToneMapping
-renderer.toneMappingExposure = 1.05
+renderer.toneMappingExposure = 1.15
 
 const scene = new THREE.Scene()
 scene.background = new THREE.Color(0x020409)
 
 const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 2000)
-camera.position.set(4.5, 8.5, 19)
+camera.position.set(17.5, 4.5, 9)
 
 const controls = new OrbitControls(camera, renderer.domElement)
 controls.enableDamping = true
 controls.dampingFactor = 0.06
-controls.minDistance = 3
+controls.minDistance = 2.2
 controls.maxDistance = 120
 
 /* ---------------- sun ---------------- */
@@ -273,7 +316,7 @@ function earthShader() {
 
         vec3 col = day;
         if (showNight) {
-          vec3 nightGlow = night * vec3(1.5, 1.7, 2.1) * (0.35 + 0.65 * max(ndl, 0.0));
+          vec3 nightGlow = night * vec3(1.6, 1.8, 2.2) * (0.35 + 0.65 * max(ndl, 0.0));
           col = mix(nightGlow, day, dayAmt);
         } else {
           col = day * (0.25 + 0.85 * max(ndl, 0.0));
@@ -497,6 +540,7 @@ function animate() {
   const oa = orbitAngle()
   const earthPos = new THREE.Vector3(Math.cos(oa) * ORBIT_R, 0, Math.sin(oa) * ORBIT_R)
   earthGroup.position.copy(earthPos)
+  controls.target.copy(earthPos)
 
   earthTilt.rotation.y = simTime / 86164 * Math.PI * 2 + oa
   clouds.rotation.y = earthTilt.rotation.y * 1.12 + 0.2
