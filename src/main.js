@@ -11,6 +11,22 @@ const loaderEl = document.getElementById('loader')
 const loaderFill = document.getElementById('loader-fill')
 const loaderStatus = document.getElementById('loader-status')
 
+const debugLog = document.createElement('div')
+debugLog.id = 'debug-log'
+debugLog.style.cssText =
+  'position:fixed;bottom:8px;left:8px;right:8px;z-index:99;background:rgba(0,0,0,0.85);color:#7dff7d;font:10px/1.5 monospace;padding:6px;border-radius:6px;max-height:120px;overflow:auto;pointer-events:none;white-space:pre-wrap'
+document.body.appendChild(debugLog)
+function dbg(msg) {
+  debugLog.textContent = (debugLog.textContent + '\n' + msg).trim()
+}
+window.addEventListener('error', (e) => dbg(`JS ERROR: ${e.message} @ ${e.filename}:${e.lineno}`))
+window.addEventListener('unhandledrejection', (e) => dbg(`PROMISE: ${e.reason}`))
+const origErr = console.error
+console.error = (...a) => {
+  origErr(...a)
+  dbg(`CONSOLE: ${a.join(' ')}`.slice(0, 600))
+}
+
 if (!window.WebGLRenderingContext) {
   loaderStatus.textContent = 'webgl not supported on this device'
   return
@@ -566,6 +582,10 @@ function animate() {
 
   controls.update()
   renderer.render(scene, camera)
+  if (!dbg.frameLogged) {
+    dbg.frameLogged = true
+    dbg(`scene ok — ${renderer.info.render.calls} draw calls, ${renderer.info.render.triangles} triangles, ${renderer.getContext().constructor.name}`)
+  }
 }
 
 /* ---------------- resize / hint ---------------- */
