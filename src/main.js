@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
+import { computeMikkTSpaceTangents } from 'three/addons/utils/BufferGeometryUtils.js'
 import './style.css'
 
 const API_KEY = import.meta.env.VITE_NASA_API_KEY || ''
@@ -99,7 +100,7 @@ const scene = new THREE.Scene()
 scene.background = new THREE.Color(0x020409)
 
 const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 2000)
-camera.position.set(17.5, 4.5, 9)
+camera.position.set(19.5, 5.5, 12.5)
 
 const controls = new OrbitControls(camera, renderer.domElement)
 controls.enableDamping = true
@@ -168,11 +169,19 @@ const orbitAngle = () => (simTime / (365.256 * 86400)) * Math.PI * 2
 const earthGroup = new THREE.Group()
 scene.add(earthGroup)
 
+const earthGeo = new THREE.SphereGeometry(EARTH_R, 96, 96)
+try {
+  computeMikkTSpaceTangents(earthGeo)
+} catch (e) {
+  const count = earthGeo.attributes.position.count
+  earthGeo.setAttribute('tangent', new THREE.BufferAttribute(new Float32Array(count * 4).fill(1), 4))
+}
+
 const earthTilt = new THREE.Group()
 earthTilt.rotation.z = TILT
 earthGroup.add(earthTilt)
 
-const earth = new THREE.Mesh(new THREE.SphereGeometry(EARTH_R, 96, 96), earthShader())
+const earth = new THREE.Mesh(earthGeo, earthShader())
 earthTilt.add(earth)
 
 const clouds = new THREE.Mesh(
