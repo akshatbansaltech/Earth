@@ -1,30 +1,41 @@
-# EARTH — 3D
+# EARTH 3D
 
-A realistic 3D Earth-and-Moon visualization, rendered with real NASA satellite imagery. The intent is a calm, photographic view of the planet from space — like a spacecraft observation, not a screensaver.
+A little slice of space on your screen. A realistically rendered Earth with the Moon swinging around it, lit by the actual Sun, computed from the real date rather than a hardcoded light.
 
 **Live demo:** https://akshatbansaltech.github.io/Earth/
 
-## Features
+## What this is
 
-- **Earth** — NASA Blue Marble day map with normal/bump relief, specular ocean highlights, and subtle night-time city lights that appear only on the dark side with a soft terminator transition
-- **Atmosphere** — thin physically-inspired scattering layer, visible only around the illuminated limb
-- **Clouds** — separate photographic cloud layer that drifts at its own slightly different rotation speed
-- **Moon** — real lunar imagery with bump-mapped craters, tidally locked to Earth, orbiting with naturally changing phases
-- **Lighting** — single directional sun; day/night separation is genuine, the night side is genuinely dark
-- **Space** — 8000 procedural stars with natural brightness and color variation, no repeating texture
-- **Camera** — damped orbit/pan/zoom controls, clamped so you can't fly through the planet, smooth reset
-- **UI** — minimal panel with pause/resume/reset and speed controls; auto-fades when idle
+A 3D Earth-and-Moon visualization that tries hard to look like something NASA would put on a wall, not like a screensaver. The whole thing is built around one idea: the Sun is a real light source, and the scene follows it.
 
-## Tech stack
+## What's in it
 
-| Layer | Choice |
+- **Earth.** Actual NASA satellite imagery on a sphere. Day map, surface relief, specular glints off the ocean, and city lights that only wake up on the night side, fading in softly across the terminator
+- **Atmosphere.** A whisper-thin scattering shell. You mostly notice it as a faint blue rim hugging the sunlit edge
+- **Clouds.** A real photographic cloud layer drifting at its own slightly different speed, like the planet breathes
+- **Moon.** Cratered lunar surface with real bump mapping, tidally locked (same face always toward Earth), and its phase changes as it orbits because the Sun lights it the same way it lights Earth
+- **The Sun.** Not a glowing sticker. Its actual position for today's date is computed (ecliptic longitude + solar declination), the sun disc and its corona sit there in the scene, and the lighting follows. Orbit the camera and the sun sets behind the planet
+- **Stars.** A few thousand procedural stars with natural brightness and color variation. No repeating texture, no weird twinkling
+- **Camera.** Damped, smooth orbit/pan/zoom. Clamped so you can't fly through the planet. Reset glides back to the original shot
+- **A date + position readout.** Top-left corner: today's date (UTC) and where Earth actually is in its orbit right now (heliocentric longitude)
+
+## Controls
+
+| Action | Input |
 |---|---|
-| 3D | [three.js](https://threejs.org) |
-| Build | [Vite](https://vitejs.dev) |
-| Textures | NASA Visible Earth |
-| Styling | Hand-written CSS (no frameworks) |
+| Orbit | Left drag |
+| Pan | Right drag |
+| Zoom | Scroll |
+| Pause / Reset / Speed | Small panel, bottom-left, fades out when you stop touching it |
 
-## Getting started
+## Tech
+
+- [three.js](https://threejs.org), the 3D engine
+- [Vite](https://vitejs.dev), builds the thing
+- [NASA Visible Earth](https://visibleearth.nasa.gov), the textures
+- Hand-written CSS, no frameworks, no templates
+
+## Running it
 
 ```bash
 npm install
@@ -32,15 +43,6 @@ npm run dev      # local dev
 npm run build    # production build into dist/
 ```
 
-## Project structure
+## The math
 
-```
-public/textures/   # NASA Earth texture maps (day, night, spec, normal, clouds, moon)
-src/main.js        # three.js scene, shaders, controls, UI
-src/style.css      # minimal UI styles
-index.html         # app shell
-```
-
-## Acknowledgements
-
-- Earth/cloud/moon textures: [NASA Visible Earth](https://visibleearth.nasa.gov)
+The Sun direction is derived from the real date (Lowell/NOAA-style solar position approximation), which sets the lighting, the terminator, and the Moon's phase. It's good to ~0.01° for our purposes. No leap second obsessions here.
