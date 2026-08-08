@@ -4,10 +4,83 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>earth</title>
+    <meta
+      name="description"
+      content="MERCURY — a live 3D model of Earth orbiting the Sun, synced to real time, with NASA near-earth object data."
+    />
+    <title>MERCURY — Earth in Orbit</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
   </head>
   <body>
-    <div id="app"></div>
+    <div id="app">
+      <canvas id="scene"></canvas>
+
+      <div id="loader">
+        <div class="loader-brand">
+          <span class="loader-dot"></span>
+          MERCURY
+        </div>
+        <div class="loader-bar"><div id="loader-fill"></div></div>
+        <div class="loader-sub" id="loader-status">loading earth…</div>
+      </div>
+
+      <header class="hud hud-top">
+        <div class="brand">
+          <div class="brand-name">MERCURY</div>
+          <div class="brand-tag">earth · in orbit · live</div>
+        </div>
+        <div class="clock">
+          <div class="clock-time" id="clock-time">--:--:--</div>
+          <div class="clock-sub" id="clock-date">—</div>
+        </div>
+      </header>
+
+      <aside class="panel neo" id="neo-panel">
+        <button class="panel-head" id="neo-toggle">
+          <span class="panel-title">
+            <span class="dot dot-blue"></span>
+            near earth objects
+          </span>
+          <span class="neo-count" id="neo-count">…</span>
+        </button>
+        <div class="panel-body" id="neo-body">
+          <div class="neo-status" id="neo-status">contacting nasa…</div>
+          <ul class="neo-list" id="neo-list"></ul>
+        </div>
+      </aside>
+
+      <aside class="panel dock">
+        <div class="dock-row">
+          <label class="dock-label" for="speed">time scale</label>
+          <input type="range" id="speed" min="0" max="5" step="1" value="2" />
+          <span class="dock-value" id="speed-label">3600×</span>
+        </div>
+        <div class="dock-row dock-presets" id="presets">
+          <button data-speed="-1" title="pause">⏸</button>
+          <button data-speed="0">1×</button>
+          <button data-speed="1">60×</button>
+          <button data-speed="2">1d/min</button>
+          <button data-speed="3">1d/s</button>
+          <button data-speed="4">1mo/s</button>
+        </div>
+        <div class="dock-row dock-toggles">
+          <button class="toggle on" id="t-realtime" title="sync earth's rotation to real time">sync</button>
+          <button class="toggle on" id="t-clouds">clouds</button>
+          <button class="toggle on" id="t-night">night lights</button>
+          <button class="toggle on" id="t-moon">moon</button>
+          <button class="toggle on" id="t-orbit">orbit</button>
+          <button class="toggle on" id="t-stars">stars</button>
+        </div>
+      </aside>
+
+      <div class="hint" id="hint">drag to orbit · scroll to zoom</div>
+      <footer class="credit">textures & data · NASA</footer>
+    </div>
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>
