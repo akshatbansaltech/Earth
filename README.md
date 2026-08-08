@@ -1,4 +1,4 @@
-# MERCURY — Earth in Orbit 🌍
+# EARTH — in Orbit 🌍
 
 A live, interactive 3D model of Earth orbiting the Sun — rendered with real NASA texture data, synced to real time, and fed with live NASA near-earth object (asteroid) telemetry.
 

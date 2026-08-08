@@ -1,10 +1,10 @@
-# Devlog — MERCURY
+# Devlog — EARTH
 
 Web dev competition build log.
 
 ## Day 1 · 2026-08-08 — scaffolding
 
-- Repo `akshatbansaltech/Earth` created; site named **MERCURY** (codenamed Earth).
+- Repo `akshatbansaltech/Earth` created; site named **EARTH**.
 - **Bug found:** GitHub Pages never deployed because `.github/workflows/deploy.yml` was an empty 0-byte file — the action run "failed" with zero jobs. Also `vite.config.js` was empty, so there was no `base` path (any build would have 404'd assets on Pages).
 - **Fixed:** real build+deploy workflow (actions/checkout → setup-node → vite build → configure-pages → upload-pages-artifact → deploy-pages), `base: '/Earth/'` in vite config, `.env` gitignored so the NASA key stays private.
 - First green build, first successful action run.
