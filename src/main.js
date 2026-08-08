@@ -47,7 +47,8 @@ const names = [
 ]
 
 let started = false
-let remaining = names.length
+let doneCount = 0
+const totalCount = names.length
 function startScene() {
   if (started) return
   started = true
@@ -57,18 +58,14 @@ function startScene() {
 
 manager.onProgress = (url, loaded, total) => {
   loaderFill.style.width = `${(loaded / total) * 100}%`
-  loaderStatus.textContent = `loading ${url.split('/').pop()}`
+  loaderStatus.textContent = `loading ${url.split('/').pop()} — ${Math.round((loaded / total) * 100)}%`
 }
-manager.onLoad = () => {
-  remaining = 0
-  startScene()
+manager.onLoad = () => startScene()
+manager.onError = () => {
+  doneCount++
+  loaderStatus.textContent = 'swapping failed texture for fallback'
+  if (doneCount >= totalCount) startScene()
 }
-manager.onError = (url) => {
-  remaining--
-  loaderStatus.textContent = `swapping ${url.split('/').pop()} for fallback`
-  if (remaining <= 0) startScene()
-}
-setTimeout(startScene, 15000)
 
 function fallbackTexture(colorA, colorB) {
   const c = document.createElement('canvas')
@@ -123,7 +120,8 @@ const scene = new THREE.Scene()
 scene.background = new THREE.Color(0x020409)
 
 const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 2000)
-camera.position.set(19.5, 5.5, 12.5)
+const isPortrait = window.innerWidth / window.innerHeight < 1
+camera.position.set(isPortrait ? 5.5 : 19.5, isPortrait ? 4.5 : 5.5, isPortrait ? 5.5 : 12.5)
 
 const controls = new OrbitControls(camera, renderer.domElement)
 controls.enableDamping = true
@@ -604,6 +602,10 @@ window.addEventListener('resize', () => {
 })
 
 setTimeout(() => document.getElementById('hint').classList.add('hidden'), 9000)
+
+if ('ontouchstart' in window) {
+  document.getElementById('hint').textContent = 'drag to orbit · pinch to zoom'
+}
 
 tickClock()
 setSpeed(2)
