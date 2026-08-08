@@ -105,7 +105,14 @@ for (const n of names) {
 /* ---------------- renderer / scene / camera ---------------- */
 
 const canvas = document.getElementById('scene')
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' })
+let renderer
+try {
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' })
+} catch (e) {
+  loaderStatus.textContent = `webgl failed: ${e.message}`
+  dbg(`webgl failed: ${e.message}`)
+  throw e
+}
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
 renderer.setSize(window.innerWidth, window.innerHeight)
 renderer.outputColorSpace = THREE.SRGBColorSpace
