@@ -22,13 +22,41 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap
 const scene = new THREE.Scene()
 scene.background = new THREE.Color(0x000000)
 
+/* ---------------- sun direction (real date) ---------------- */
+
+const DEG = Math.PI / 180
+
+function sunDirectionFromDate(date) {
+  const j2000 = Date.UTC(2000, 0, 1, 12)
+  const n = (date.getTime() - j2000) / 86400000
+  const g = (357.529 + 0.98560028 * n) * DEG
+  const q = (280.459 + 0.98564736 * n) * DEG
+  const L = q + 1.915 * Math.sin(g) + 0.02 * Math.sin(2 * g)
+  const eps = 23.4393 * DEG
+  const dir = new THREE.Vector3(
+    Math.cos(L),
+    Math.sin(L) * Math.sin(eps),
+    Math.sin(L) * Math.cos(eps)
+  ).normalize()
+  const lonDeg = ((L / DEG) % 360 + 360) % 360
+  return { dir, lonDeg, date: date.toISOString().slice(0, 10) }
+}
+
+const SUN = sunDirectionFromDate(new Date())
+const SUN_DIR = SUN.dir
+
+/* ---------------- camera ---------------- */
+
 const camera = new THREE.PerspectiveCamera(
   40,
   window.innerWidth / window.innerHeight,
   0.05,
   4000
 )
-const CAM_DEFAULT = new THREE.Vector3(5.2, 2.3, 7.0)
+const CAM_DEFAULT = new THREE.Vector3()
+  .copy(SUN_DIR)
+  .applyAxisAngle(new THREE.Vector3(0, 1, 0), 0.42)
+  .multiplyScalar(9)
 camera.position.copy(CAM_DEFAULT)
 
 /* ---------------- controls ---------------- */
@@ -47,9 +75,56 @@ canvas.addEventListener('contextmenu', (e) => e.preventDefault())
 controls.addEventListener('start', () => canvas.classList.add('dragging'))
 controls.addEventListener('end', () => canvas.classList.remove('dragging'))
 
-/* ---------------- light ---------------- */
+/* ---------------- sun ---------------- */
 
-const SUN_DIR = new THREE.Vector3(0.9, 0.22, 0.36).normalize()
+const sunMat = new THREE.ShaderMaterial({
+  uniforms: { uColor: { value: new THREE.Color(1.0, 0.96, 0.88) } },
+  vertexShader: `
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `,
+  fragmentShader: `
+    uniform vec3 uColor;
+    varying vec2 vUv;
+    void main() {
+      vec2 p = vUv * 2.0 - 1.0;
+      float r = length(p);
+      if (r > 1.0) discard;
+      float limb = pow(1.0 - r * r, 1.4);
+      gl_FragColor = vec4(uColor * (0.25 + 3.2 * limb), 1.0);
+    }
+  `,
+})
+const sunMesh = new THREE.Mesh(new THREE.SphereGeometry(6, 48, 32), sunMat)
+sunMesh.position.copy(SUN_DIR).multiplyScalar(90)
+scene.add(sunMesh)
+
+const glowCanvas = document.createElement('canvas')
+glowCanvas.width = glowCanvas.height = 256
+const glowCtx = glowCanvas.getContext('2d')
+const glowGrad = glowCtx.createRadialGradient(128, 128, 0, 128, 128, 128)
+glowGrad.addColorStop(0, 'rgba(255, 242, 214, 0.28)')
+glowGrad.addColorStop(0.35, 'rgba(255, 230, 190, 0.1)')
+glowGrad.addColorStop(1, 'rgba(255, 230, 190, 0)')
+glowCtx.fillStyle = glowGrad
+glowCtx.fillRect(0, 0, 256, 256)
+const glowTex = new THREE.CanvasTexture(glowCanvas)
+const glow = new THREE.Sprite(
+  new THREE.SpriteMaterial({
+    map: glowTex,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    transparent: true,
+  })
+)
+glow.position.copy(SUN_DIR).multiplyScalar(90)
+glow.scale.set(34, 34, 1)
+scene.add(glow)
+
+/* ---------------- light ---------------- */
 
 const sun = new THREE.DirectionalLight(0xffffff, 2.8)
 sun.position.copy(SUN_DIR).multiplyScalar(-60)
@@ -273,12 +348,14 @@ orbitGroup.add(moonMesh)
 
 /* ---------------- state / ui ---------------- */
 
+const MOON_START = Math.atan2(SUN_DIR.x, -SUN_DIR.z) - 0.7
+
 const state = {
   paused: false,
   rotSpeed: 1,
   orbSpeed: 1,
   earthAngle: 0,
-  orbitAngle: Math.PI,
+  orbitAngle: MOON_START,
 }
 
 const panel = document.getElementById('panel')
@@ -310,13 +387,17 @@ function flyTo(pos, dur = 1.4) {
 
 btnReset.addEventListener('click', () => {
   state.earthAngle = 0
-  state.orbitAngle = Math.PI
+  state.orbitAngle = MOON_START
   spinGroup.rotation.y = 0
   cloudMesh.rotation.y = 0
-  orbitGroup.rotation.y = Math.PI
-  moonMesh.rotation.y = Math.PI
+  orbitGroup.rotation.y = MOON_START
+  moonMesh.rotation.y = MOON_START
   flyTo(CAM_DEFAULT)
 })
+
+document.getElementById('hud-date').textContent = SUN.date + ' utc'
+document.getElementById('hud-pos').textContent =
+  'earth ' + ((SUN.lonDeg + 180) % 360).toFixed(1) + '°'
 
 let idleTimer = null
 const armIdle = () => {
