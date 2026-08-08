@@ -4,64 +4,40 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta
-      name="description"
-      content="earth — a live simulation of global wind, inspired by earth.nullschool.net"
-    />
-    <title>earth — live simulation of global wind</title>
+    <title>earth — 3d</title>
   </head>
   <body>
-    <div id="app">
-      <canvas id="map"></canvas>
+    <canvas id="map"></canvas>
 
-      <div id="loader">
-        <div class="loader-brand"><span class="loader-dot"></span> earth</div>
-        <div class="loader-sub">loading map data…</div>
-      </div>
-
-      <header class="hud hud-top">
-        <div class="brand">earth</div>
-        <div class="clock" id="clock">—</div>
-      </header>
-
-      <div class="hud hud-bottom">
-        <div class="credit">
-          live simulation of global wind
-          <span class="dim">· textures NASA</span>
-        </div>
-        <div class="controls">
-          <button id="btn-pause" title="pause">⏸</button>
-          <button id="btn-menu" title="menu">☰</button>
-        </div>
-      </div>
-
-      <nav class="panel" id="panel" hidden>
-        <div class="panel-head" data-sec="sec-earth">earth<span class="chev">▸</span></div>
-        <div class="panel-sec" id="sec-earth">
-          <ul>
-            <li class="row"><span>wind</span><span class="dim">synthetic</span></li>
-          </ul>
-        </div>
-        <div class="panel-head" data-sec="sec-overlays">overlays<span class="chev">▸</span></div>
-        <div class="panel-sec" id="sec-overlays">
-          <ul>
-            <li class="row toggle-row" data-key="wind"><span>wind</span><span class="state">on</span></li>
-            <li class="row toggle-row" data-key="particles"><span>particles</span><span class="state">on</span></li>
-            <li class="row toggle-row" data-key="grid"><span>wind grid</span><span class="state">off</span></li>
-            <li class="row toggle-row" data-key="trails"><span>streak trails</span><span class="state">on</span></li>
-          </ul>
-        </div>
-        <div class="panel-head" data-sec="sec-wind">wind<span class="chev">▸</span></div>
-        <div class="panel-sec" id="sec-wind">
-          <ul>
-            <li class="row"><span>opacity</span><input type="range" id="opt-opacity" min="0" max="1" step="0.05" value="1" /></li>
-            <li class="row"><span>velocity scale</span><input type="range" id="opt-vel" min="0.25" max="3" step="0.05" value="1" /></li>
-            <li class="row"><span>particles</span><input type="range" id="opt-count" min="1000" max="12000" step="250" value="5000" /></li>
-          </ul>
-        </div>
-        <div class="panel-foot">drag to pan · scroll to zoom · double-click to reset</div>
-      </nav>
+    <div id="loader">
+      <div class="loader-dot"></div>
+      <div class="loader-text">loading</div>
     </div>
+
+    <aside class="panel" id="panel">
+      <div class="panel-head">simulation</div>
+      <div class="row">
+        <button id="btn-pause" class="btn">pause</button>
+        <button id="btn-reset" class="btn">reset</button>
+      </div>
+      <div class="panel-head">speed</div>
+      <div class="row">
+        <span class="lbl">rotation</span>
+        <span class="ctl">
+          <input type="range" id="opt-rot" min="0" max="3" step="0.05" value="1" />
+          <span class="val" id="val-rot">1.00</span>
+        </span>
+      </div>
+      <div class="row">
+        <span class="lbl">moon orbit</span>
+        <span class="ctl">
+          <input type="range" id="opt-orb" min="0" max="3" step="0.05" value="1" />
+          <span class="val" id="val-orb">1.00</span>
+        </span>
+      </div>
+      <div class="panel-foot">drag to orbit · right-drag to pan · scroll to zoom</div>
+    </aside>
+
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>
