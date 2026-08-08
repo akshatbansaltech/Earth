@@ -1,611 +1,397 @@
-import * as THREE from 'three'
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
-import { computeMikkTSpaceTangents } from 'three/addons/utils/BufferGeometryUtils.js'
 import './style.css'
 
-const API_KEY = import.meta.env.VITE_NASA_API_KEY || ''
-const BASE = import.meta.env.BASE_URL
+/* ---------------- canvas / view ---------------- */
 
-const app = document.getElementById('app')
-const loaderEl = document.getElementById('loader')
-const loaderFill = document.getElementById('loader-fill')
-const loaderStatus = document.getElementById('loader-status')
+const canvas = document.getElementById('map')
+const ctx = canvas.getContext('2d')
 
-const debugLog = document.createElement('div')
-debugLog.id = 'debug-log'
-debugLog.style.cssText =
-  'position:fixed;bottom:8px;left:8px;right:8px;z-index:99;background:rgba(0,0,0,0.85);color:#7dff7d;font:10px/1.5 monospace;padding:6px;border-radius:6px;max-height:120px;overflow:auto;pointer-events:none;white-space:pre-wrap'
-document.body.appendChild(debugLog)
-function dbg(msg) {
-  debugLog.textContent = (debugLog.textContent + '\n' + msg).trim()
+let W = 0
+let H = 0
+let dpr = 1
+function resize() {
+  dpr = Math.min(window.devicePixelRatio || 1, 2)
+  W = window.innerWidth
+  H = window.innerHeight
+  canvas.width = W * dpr
+  canvas.height = H * dpr
 }
-window.addEventListener('error', (e) => dbg(`JS ERROR: ${e.message} @ ${e.filename}:${e.lineno}`))
-window.addEventListener('unhandledrejection', (e) => dbg(`PROMISE: ${e.reason}`))
-const origErr = console.error
-console.error = (...a) => {
-  origErr(...a)
-  dbg(`CONSOLE: ${a.join(' ')}`.slice(0, 600))
-}
+resize()
+window.addEventListener('resize', () => { resize(); dirty = true })
 
-if (!window.WebGLRenderingContext) {
-  loaderStatus.textContent = 'webgl not supported on this device'
-  return
-}
+/* ---------------- mercator world ---------------- */
 
-/* ---------------- loading manager ---------------- */
+const WBASE = 1024
+const YMAX = Math.atanh(Math.sin((85 * Math.PI) / 180))
 
-const textures = {}
-const manager = new THREE.LoadingManager()
-const texLoader = new THREE.TextureLoader(manager)
-const names = [
-  'earth_atmos_2048.jpg',
-  'earth_lights_2048.png',
-  'earth_clouds_1024.png',
-  'earth_specular_2048.jpg',
-  'earth_normal_2048.jpg',
-  'moon_1024.jpg',
-]
+const mercX = (lon) => ((lon + 180) / 360) * WBASE
+const mercY = (lat) => WBASE * (1 - (Math.atanh(Math.sin((lat * Math.PI) / 180)) / YMAX + 1) / 2)
+const invLon = (x) => (x / WBASE) * 360 - 180
+const invLat = (y) => Math.asin(Math.tanh((1 - (2 * y) / WBASE) * YMAX)) * (180 / Math.PI)
 
-let started = false
-let doneCount = 0
-const totalCount = names.length
-function startScene() {
-  if (started) return
-  started = true
-  loaderEl.classList.add('hidden')
-  animate()
+let view = { zoom: 1, cx: WBASE / 2, cy: WBASE / 2, panX: 0, panY: 0 }
+let dirty = true
+
+function resetView() {
+  view = { zoom: 1, cx: WBASE / 2, cy: WBASE / 2, panX: 0, panY: 0 }
+  dirty = true
 }
 
-manager.onProgress = (url, loaded, total) => {
-  loaderFill.style.width = `${(loaded / total) * 100}%`
-  loaderStatus.textContent = `loading ${url.split('/').pop()} — ${Math.round((loaded / total) * 100)}%`
-}
-manager.onLoad = () => startScene()
-manager.onError = () => {
-  doneCount++
-  loaderStatus.textContent = 'swapping failed texture for fallback'
-  if (doneCount >= totalCount) startScene()
-}
-
-function fallbackTexture(colorA, colorB) {
-  const c = document.createElement('canvas')
-  c.width = c.height = 256
-  const ctx = c.getContext('2d')
-  const g = ctx.createRadialGradient(128, 128, 20, 128, 128, 128)
-  g.addColorStop(0, colorA)
-  g.addColorStop(1, colorB)
-  ctx.fillStyle = g
-  ctx.fillRect(0, 0, 256, 256)
-  for (let i = 0; i < 900; i++) {
-    ctx.fillStyle = `rgba(255,255,255,${Math.random() * 0.08})`
-    ctx.fillRect(Math.random() * 256, Math.random() * 256, 2, 2)
-  }
-  const t = new THREE.CanvasTexture(c)
-  t.colorSpace = THREE.SRGBColorSpace
-  return t
-}
-
-for (const n of names) {
-  const key = n.split('.')[0]
-  textures[key] = texLoader.load(
-    `${BASE}textures/${n}`,
-    (t) => {
-      if (key !== 'earth_normal_2048' && key !== 'earth_specular_2048') t.colorSpace = THREE.SRGBColorSpace
-    },
-    undefined,
-    () => {
-      textures[key] = fallbackTexture('#2f6fd8', '#0b1d3d')
-    }
+function applyView() {
+  const t = dpr * view.zoom
+  ctx.setTransform(
+    t, 0, 0, t,
+    dpr * (W / 2 - view.cx * view.zoom + view.panX),
+    dpr * (H / 2 - view.cy * view.zoom + view.panY)
   )
 }
 
-/* ---------------- renderer / scene / camera ---------------- */
+/* ---------------- map (mercator remap of equirect texture) ---------------- */
 
-const canvas = document.getElementById('scene')
-let renderer
-try {
-  renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' })
-} catch (e) {
-  loaderStatus.textContent = `webgl failed: ${e.message}`
-  dbg(`webgl failed: ${e.message}`)
-  throw e
-}
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
-renderer.setSize(window.innerWidth, window.innerHeight)
-renderer.outputColorSpace = THREE.SRGBColorSpace
-renderer.toneMapping = THREE.ACESFilmicToneMapping
-renderer.toneMappingExposure = 1.15
+const mapCanvas = document.createElement('canvas')
+mapCanvas.width = mapCanvas.height = WBASE
+let mapReady = false
 
-const scene = new THREE.Scene()
-scene.background = new THREE.Color(0x020409)
+function buildMap(src) {
+  const tmp = document.createElement('canvas')
+  tmp.width = WBASE
+  tmp.height = WBASE / 2
+  tmp.getContext('2d').drawImage(src, 0, 0, WBASE, WBASE / 2)
+  const s = tmp.getContext('2d').getImageData(0, 0, WBASE, WBASE / 2).data
+  const out = mapCanvas.getContext('2d').createImageData(WBASE, WBASE)
+  const d = out.data
+  const clamp = (v) => (v < 0 ? 0 : v > 255 ? 255 : v)
 
-const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 2000)
-const isPortrait = window.innerWidth / window.innerHeight < 1
-camera.position.set(isPortrait ? 5.5 : 19.5, isPortrait ? 4.5 : 5.5, isPortrait ? 5.5 : 12.5)
+  for (let y = 0; y < WBASE; y++) {
+    const lat = invLat(y)
+    const fy = ((90 - lat) / 180) * (WBASE / 2)
+    const y0 = Math.min(WBASE / 2 - 1, Math.max(0, Math.floor(fy)))
+    const y1 = Math.min(WBASE / 2 - 1, y0 + 1)
+    const yf = fy - y0
+    for (let x = 0; x < WBASE; x++) {
+      const lon = invLon(x)
+      const fx = ((lon + 180) / 360) * WBASE
+      const x0 = Math.min(WBASE - 1, Math.max(0, Math.floor(fx)))
+      const x1 = Math.min(WBASE - 1, x0 + 1)
+      const xf = fx - x0
 
-const controls = new OrbitControls(camera, renderer.domElement)
-controls.enableDamping = true
-controls.dampingFactor = 0.06
-controls.minDistance = 2.2
-controls.maxDistance = 120
+      const i00 = (y0 * WBASE + x0) * 4
+      const i10 = (y0 * WBASE + x1) * 4
+      const i01 = (y1 * WBASE + x0) * 4
+      const i11 = (y1 * WBASE + x1) * 4
+      const r = (s[i00] * (1 - xf) + s[i10] * xf) * (1 - yf) + (s[i01] * (1 - xf) + s[i11] * xf) * yf
+      const g = (s[i00 + 1] * (1 - xf) + s[i10 + 1] * xf) * (1 - yf) + (s[i01 + 1] * (1 - xf) + s[i11 + 1] * xf) * yf
+      const b = (s[i00 + 2] * (1 - xf) + s[i10 + 2] * xf) * (1 - yf) + (s[i01 + 2] * (1 - xf) + s[i11 + 2] * xf) * yf
 
-/* ---------------- sun ---------------- */
-
-function radialTexture(stops, size = 512) {
-  const c = document.createElement('canvas')
-  c.width = c.height = size
-  const ctx = c.getContext('2d')
-  const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2)
-  for (const [off, col] of stops) g.addColorStop(off, col)
-  ctx.fillStyle = g
-  ctx.fillRect(0, 0, size, size)
-  const t = new THREE.CanvasTexture(c)
-  t.colorSpace = THREE.SRGBColorSpace
-  return t
-}
-
-const sunRadius = 3
-const sun = new THREE.Mesh(
-  new THREE.SphereGeometry(sunRadius, 48, 48),
-  new THREE.MeshBasicMaterial({
-    map: radialTexture([
-      [0, '#fffdf4'],
-      [0.35, '#fff3c4'],
-      [0.7, '#ffd27a'],
-      [1, 'rgba(255,150,60,0)'],
-    ]),
-  })
-)
-sun.rotation.z = 0.4
-scene.add(sun)
-
-const sunGlow = new THREE.Sprite(
-  new THREE.SpriteMaterial({
-    map: radialTexture([
-      [0, 'rgba(255,220,150,0.9)'],
-      [0.25, 'rgba(255,180,90,0.35)'],
-      [1, 'rgba(255,140,60,0)'],
-    ], 512),
-    blending: THREE.AdditiveBlending,
-    depthWrite: false,
-    transparent: true,
-  })
-)
-sunGlow.scale.setScalar(sunRadius * 7)
-scene.add(sunGlow)
-
-const sunLight = new THREE.PointLight(0xfff3d6, 900, 0, 2)
-sunLight.position.set(0, 0, 0)
-scene.add(sunLight)
-scene.add(new THREE.AmbientLight(0x1a2740, 0.55))
-
-/* ---------------- earth ---------------- */
-
-const ORBIT_R = 12
-const EARTH_R = 1
-const TILT = THREE.MathUtils.degToRad(23.44)
-
-const orbitAngle = () => (simTime / (365.256 * 86400)) * Math.PI * 2
-
-const earthGroup = new THREE.Group()
-scene.add(earthGroup)
-
-const earthGeo = new THREE.SphereGeometry(EARTH_R, 96, 96)
-try {
-  computeMikkTSpaceTangents(earthGeo)
-} catch (e) {
-  const count = earthGeo.attributes.position.count
-  earthGeo.setAttribute('tangent', new THREE.BufferAttribute(new Float32Array(count * 4).fill(1), 4))
-}
-
-const earthTilt = new THREE.Group()
-earthTilt.rotation.z = TILT
-earthGroup.add(earthTilt)
-
-const earth = new THREE.Mesh(earthGeo, earthShader())
-earthTilt.add(earth)
-
-const clouds = new THREE.Mesh(
-  new THREE.SphereGeometry(EARTH_R * 1.012, 64, 64),
-  new THREE.MeshPhongMaterial({
-    map: textures.earth_clouds_1024,
-    transparent: true,
-    opacity: 0.9,
-    depthWrite: false,
-    blending: THREE.NormalBlending,
-  })
-)
-earthTilt.add(clouds)
-
-const atmosphere = new THREE.Mesh(
-  new THREE.SphereGeometry(EARTH_R * 1.04, 64, 64),
-  atmosphereShader()
-)
-earthTilt.add(atmosphere)
-
-const orbitPath = new THREE.Mesh(
-  new THREE.RingGeometry(ORBIT_R - 0.02, ORBIT_R + 0.02, 160),
-  new THREE.MeshBasicMaterial({
-    color: 0x57a7ff,
-    transparent: true,
-    opacity: 0.22,
-    side: THREE.DoubleSide,
-    depthWrite: false,
-  })
-)
-orbitPath.rotation.x = -Math.PI / 2
-scene.add(orbitPath)
-
-/* ---------------- moon ---------------- */
-
-const moonOrbit = new THREE.Group()
-earthGroup.add(moonOrbit)
-moonOrbit.rotation.z = THREE.MathUtils.degToRad(5.14)
-
-const moon = new THREE.Mesh(
-  new THREE.SphereGeometry(0.27, 48, 48),
-  new THREE.MeshStandardMaterial({ map: textures.moon_1024, roughness: 1, metalness: 0 })
-)
-moonOrbit.add(moon)
-
-/* ---------------- stars ---------------- */
-
-function starField(count, radiusMin, radiusMax, size, opacity) {
-  const pos = new Float32Array(count * 3)
-  const col = new Float32Array(count * 3)
-  const palette = [
-    [1, 1, 1],
-    [0.75, 0.85, 1],
-    [1, 0.9, 0.75],
-    [0.85, 0.8, 1],
-  ]
-  for (let i = 0; i < count; i++) {
-    const r = radiusMin + Math.random() * (radiusMax - radiusMin)
-    const theta = Math.random() * Math.PI * 2
-    const phi = Math.acos(2 * Math.random() - 1)
-    pos[i * 3] = r * Math.sin(phi) * Math.cos(theta)
-    pos[i * 3 + 1] = r * Math.cos(phi)
-    pos[i * 3 + 2] = r * Math.sin(phi) * Math.sin(theta)
-    const c = palette[(Math.random() * palette.length) | 0]
-    const b = 0.5 + Math.random() * 0.5
-    col[i * 3] = c[0] * b
-    col[i * 3 + 1] = c[1] * b
-    col[i * 3 + 2] = c[2] * b
+      const lum = (r + g + b) / 765
+      const ocean = b > r * 1.25 && b > g * 1.15
+      const base = ocean ? [8, 24, 40] : [96, 108, 82]
+      const f = 0.45 + lum * 0.85
+      const idx = (y * WBASE + x) * 4
+      d[idx] = clamp(base[0] * f)
+      d[idx + 1] = clamp(base[1] * f)
+      d[idx + 2] = clamp(base[2] * f)
+      d[idx + 3] = 255
+    }
   }
-  const g = new THREE.BufferGeometry()
-  g.setAttribute('position', new THREE.BufferAttribute(pos, 3))
-  g.setAttribute('color', new THREE.BufferAttribute(col, 3))
-  const m = new THREE.PointsMaterial({
-    size,
-    vertexColors: true,
-    transparent: true,
-    opacity,
-    sizeAttenuation: true,
-    depthWrite: false,
-  })
-  return new THREE.Points(g, m)
+  mapCanvas.getContext('2d').putImageData(out, 0, 0)
+  mapReady = true
+  document.getElementById('loader').classList.add('hidden')
 }
 
-const starsFar = starField(4000, 350, 900, 1.6, 0.85)
-const starsNear = starField(900, 120, 260, 2.6, 0.9)
-scene.add(starsFar, starsNear)
+const mapImg = new Image()
+mapImg.src = `${import.meta.env.BASE_URL}textures/earth_atmos_2048.jpg`
+mapImg.onload = () => buildMap(mapImg)
 
-/* ---------------- shaders ---------------- */
+/* ---------------- wind field (value-noise flow) ---------------- */
 
-function earthShader() {
-  return new THREE.ShaderMaterial({
-    uniforms: {
-      dayMap: { value: textures.earth_atmos_2048 },
-      nightMap: { value: textures.earth_lights_2048 },
-      specMap: { value: textures.earth_specular_2048 },
-      normalMap: { value: textures.earth_normal_2048 },
-      sunDirection: { value: new THREE.Vector3(1, 0, 0) },
-      showNight: { value: true },
-    },
-    vertex: /* glsl */ `
-      varying vec2 vUv;
-      varying vec3 vWorldPos;
-      varying mat3 vTBN;
-
-      void main() {
-        vUv = uv;
-        vec4 wp = modelMatrix * vec4(position, 1.0);
-        vWorldPos = wp.xyz;
-
-        vec3 N = normalize(mat3(modelMatrix) * normal);
-        vec3 T = normalize(mat3(modelMatrix) * tangent);
-        T = normalize(T - N * dot(T, N));
-        vec3 B = cross(N, T);
-        vTBN = mat3(T, B, N);
-
-        gl_Position = projectionMatrix * viewMatrix * wp;
-      }
-    `,
-    fragment: /* glsl */ `
-      uniform sampler2D dayMap;
-      uniform sampler2D nightMap;
-      uniform sampler2D specMap;
-      uniform sampler2D normalMap;
-      uniform vec3 sunDirection;
-      uniform bool showNight;
-
-      varying vec2 vUv;
-      varying vec3 vWorldPos;
-      varying mat3 vTBN;
-
-      void main() {
-        vec3 mapN = texture2D(normalMap, vUv).xyz * 2.0 - 1.0;
-        vec3 n = normalize(vTBN * mapN);
-        vec3 l = normalize(sunDirection);
-
-        float ndl = dot(n, l);
-        float dayAmt = smoothstep(-0.12, 0.32, ndl);
-
-        vec3 day = texture2D(dayMap, vUv).rgb;
-        vec3 night = texture2D(nightMap, vUv).rgb;
-
-        vec3 col = day;
-        if (showNight) {
-          vec3 nightGlow = night * vec3(1.6, 1.8, 2.2) * (0.35 + 0.65 * max(ndl, 0.0));
-          col = mix(nightGlow, day, dayAmt);
-        } else {
-          col = day * (0.25 + 0.85 * max(ndl, 0.0));
-        }
-
-        vec3 v = normalize(cameraPosition - vWorldPos);
-        vec3 h = normalize(l + v);
-        float specAmt = texture2D(specMap, vUv).r;
-        vec3 spec = specAmt * pow(max(dot(n, h), 0.0), 28.0) * vec3(1.0, 0.92, 0.78) * 1.7 * dayAmt;
-
-        float fres = pow(1.0 - max(dot(n, v), 0.0), 3.0);
-        vec3 rim = fres * vec3(0.22, 0.42, 0.85) * 1.3 * dayAmt;
-
-        col = col + spec + rim;
-        gl_FragColor = vec4(col, 1.0);
-      }
-    `,
-  })
+function mulberry32(seed) {
+  let a = seed >>> 0
+  return () => {
+    a |= 0
+    a = (a + 0x6d2b79f5) | 0
+    let t = Math.imul(a ^ (a >>> 15), 1 | a)
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
 }
 
-function atmosphereShader() {
-  return new THREE.ShaderMaterial({
-    uniforms: {
-      sunDirection: { value: new THREE.Vector3(1, 0, 0) },
-    },
-    transparent: true,
-    blending: THREE.AdditiveBlending,
-    depthWrite: false,
-    vertex: /* glsl */ `
-      varying vec3 vWorldPos;
-      varying vec3 vNormalW;
-      void main() {
-        vec4 wp = modelMatrix * vec4(position, 1.0);
-        vWorldPos = wp.xyz;
-        vNormalW = normalize(mat3(modelMatrix) * normal);
-        gl_Position = projectionMatrix * viewMatrix * wp;
-      }
-    `,
-    fragment: /* glsl */ `
-      uniform vec3 sunDirection;
-      varying vec3 vWorldPos;
-      varying vec3 vNormalW;
-      void main() {
-        vec3 n = normalize(vNormalW);
-        vec3 v = normalize(cameraPosition - vWorldPos);
-        float fres = pow(1.0 - max(dot(n, v), 0.0), 4.5);
-        float sunAmt = smoothstep(-0.35, 0.55, dot(n, normalize(sunDirection)));
-        float alpha = fres * (0.25 + 0.75 * sunAmt);
-        vec3 col = mix(vec3(0.18, 0.4, 0.95), vec3(0.45, 0.75, 1.4), sunAmt);
-        gl_FragColor = vec4(col, alpha);
-      }
-    `,
-  })
+function makeNoise(seed) {
+  const nx = 36
+  const ny = 18
+  const rand = mulberry32(seed)
+  const g = new Float32Array(nx * ny)
+  for (let i = 0; i < g.length; i++) g[i] = rand() * 2 - 1
+  const at = (ix, iy) => g[(((iy % ny) + ny) % ny) * nx + (((ix % nx) + nx) % nx)]
+  const smooth = (t) => t * t * (3 - 2 * t)
+  return (lon, lat) => {
+    const fx = ((lon + 180) / 360) * nx
+    const fy = ((90 - lat) / 180) * ny
+    const x0 = Math.floor(fx)
+    const y0 = Math.floor(fy)
+    const xf = smooth(fx - x0)
+    const yf = smooth(fy - y0)
+    return (
+      at(x0, y0) * (1 - xf) * (1 - yf) +
+      at(x0 + 1, y0) * xf * (1 - yf) +
+      at(x0, y0 + 1) * (1 - xf) * yf +
+      at(x0 + 1, y0 + 1) * xf * yf
+    )
+  }
 }
 
-/* ---------------- time ---------------- */
+const n1 = makeNoise(7)
+const n2 = makeNoise(31)
 
-const SPEEDS = [1, 60, 3600, 86400, 2592000, 31536000]
-let simSpeed = SPEEDS[2]
+const NX = 144
+const NY = 72
+const U = new Float32Array(NX * NY)
+const V = new Float32Array(NX * NY)
+
+for (let j = 0; j < NY; j++) {
+  const lat = 90 - (j + 0.5) * (180 / NY)
+  const a = Math.abs(lat)
+  for (let i = 0; i < NX; i++) {
+    const lon = -180 + (i + 0.5) * (360 / NX)
+    const uBase =
+      7 * Math.exp(-((a - 52) ** 2) / 150) -
+      5 * Math.exp(-((a - 12) ** 2) / 90) +
+      3 * Math.exp(-((a - 72) ** 2) / 120)
+    const idx = j * NX + i
+    U[idx] = uBase + (n1(lon, lat) + 0.5 * n2(lon * 2 + 13, lat * 2 - 7)) * 6
+    V[idx] = (n1(lon + 40, lat + 17) + 0.5 * n2(lon * 2 - 23, lat * 2 + 11)) * 4 - a * 0.03
+  }
+}
+
+function sampleWind(lon, lat, isU) {
+  const gx = Math.min(NX - 1.001, Math.max(0, ((lon + 180) / 360) * NX))
+  const gy = Math.min(NY - 1.001, Math.max(0, ((90 - lat) / 180) * NY))
+  const x0 = Math.floor(gx)
+  const y0 = Math.floor(gy)
+  const xf = gx - x0
+  const yf = gy - y0
+  const arr = isU ? U : V
+  const a = arr[y0 * NX + x0]
+  const b = arr[y0 * NX + x0 + 1]
+  const c = arr[(y0 + 1) * NX + x0]
+  const d = arr[(y0 + 1) * NX + x0 + 1]
+  return a * (1 - xf) * (1 - yf) + b * xf * (1 - yf) + c * (1 - xf) * yf + d * xf * yf
+}
+
+/* ---------------- particles ---------------- */
+
+const PARTICLES = []
+
+function makeParticle() {
+  return { x: Math.random() * WBASE, y: Math.random() * WBASE, age: Math.random() * 320 }
+}
+
+function rebuildParticles(n) {
+  PARTICLES.length = 0
+  for (let i = 0; i < n; i++) PARTICLES.push(makeParticle())
+}
+
+const SPEED_COLORS = [
+  [0, [242, 251, 255]],
+  [5, [172, 226, 242]],
+  [10, [92, 178, 216]],
+  [15, [64, 146, 204]],
+  [20, [96, 190, 110]],
+  [25, [240, 210, 74]],
+  [30, [240, 154, 60]],
+  [35, [240, 90, 74]],
+  [40, [216, 74, 224]],
+]
+
+function speedColor(s) {
+  let a = SPEED_COLORS[0]
+  let b = SPEED_COLORS[SPEED_COLORS.length - 1]
+  for (let i = 0; i < SPEED_COLORS.length - 1; i++) {
+    if (s <= SPEED_COLORS[i + 1][0]) { a = SPEED_COLORS[i]; b = SPEED_COLORS[i + 1]; break }
+  }
+  const t = Math.min(1, Math.max(0, (s - a[0]) / (b[0] - a[0])))
+  const ca = a[1]
+  const cb = b[1]
+  return `rgb(${Math.round(ca[0] + (cb[0] - ca[0]) * t)},${Math.round(ca[1] + (cb[1] - ca[1]) * t)},${Math.round(ca[2] + (cb[2] - ca[2]) * t)})`
+}
+
+function offScreen(x, y) {
+  const sx = (x - view.cx) * view.zoom + W / 2 + view.panX
+  const sy = (y - view.cy) * view.zoom + H / 2 + view.panY
+  return sx < -30 || sx > W + 30 || sy < -30 || sy > H + 30
+}
+
+/* ---------------- settings ---------------- */
+
 let paused = false
-let realtime = true
-let simTime = Date.now() / 1000
+let showWind = true
+let showParticles = true
+let showGrid = false
+let trails = true
+let opacity = 1
+let velScale = 1
+let count = 5000
+const K = 80000
 
-const speedSlider = document.getElementById('speed')
-const speedLabel = document.getElementById('speed-label')
+/* ---------------- UI wiring ---------------- */
 
-function setSpeed(idx, slider = true) {
-  if (idx === -1) {
-    paused = !paused
-  } else {
-    paused = false
-    simSpeed = SPEEDS[idx]
-    if (slider) speedSlider.value = idx
-    document.querySelectorAll('#presets button').forEach((b, i) => {
-      b.classList.toggle('active', String(i) === String(idx))
-    })
-  }
-  renderSpeedLabel()
-}
+const btnPause = document.getElementById('btn-pause')
+const btnMenu = document.getElementById('btn-menu')
+const panel = document.getElementById('panel')
 
-function renderSpeedLabel() {
-  if (paused) {
-    speedLabel.textContent = 'paused'
-    return
-  }
-  const map = { '1': '1×', '60': '60×', '3600': '1d/min', '86400': '1d/s', '2592000': '1mo/s', '31536000': '1yr/s' }
-  speedLabel.textContent = paused ? 'paused' : map[String(simSpeed)]
-}
-
-speedSlider.addEventListener('input', () => setSpeed(Number(speedSlider.value), false))
-
-document.getElementById('presets').addEventListener('click', (e) => {
-  const b = e.target.closest('button')
-  if (b) setSpeed(Number(b.dataset.speed))
+btnPause.addEventListener('click', () => {
+  paused = !paused
+  btnPause.textContent = paused ? '▶' : '⏸'
 })
 
-const toggles = {
-  realtime: document.getElementById('t-realtime'),
-  clouds: document.getElementById('t-clouds'),
-  night: document.getElementById('t-night'),
-  moon: document.getElementById('t-moon'),
-  orbit: document.getElementById('t-orbit'),
-  stars: document.getElementById('t-stars'),
-}
+btnMenu.addEventListener('click', () => {
+  panel.hidden = !panel.hidden
+})
 
-for (const [key, btn] of Object.entries(toggles)) {
-  btn.addEventListener('click', () => {
-    btn.classList.toggle('on')
-    applyToggles()
+panel.querySelectorAll('.panel-head').forEach((head) => {
+  head.addEventListener('click', () => {
+    head.classList.toggle('open')
+    document.getElementById(head.dataset.sec).classList.toggle('open')
   })
-}
-
-function applyToggles() {
-  clouds.visible = toggles.clouds.classList.contains('on')
-  atmosphere.visible = toggles.clouds.classList.contains('on')
-  moonOrbit.visible = toggles.moon.classList.contains('on')
-  orbitPath.visible = toggles.orbit.classList.contains('on')
-  starsFar.visible = starsNear.visible = toggles.stars.classList.contains('on')
-  earth.material.uniforms.showNight.value = toggles.night.classList.contains('on')
-  toggles.realtime.classList.toggle('on', realtime)
-}
-
-applyToggles()
-
-/* ---------------- clock HUD ---------------- */
-
-const clockTime = document.getElementById('clock-time')
-const clockDate = document.getElementById('clock-date')
-
-function fmt(n) {
-  return String(n).padStart(2, '0')
-}
-
-function tickClock() {
-  const d = new Date(simTime * 1000)
-  clockTime.textContent = `${fmt(d.getUTCHours())}:${fmt(d.getUTCMinutes())}:${fmt(d.getUTCSeconds())}`
-  const date = `${d.getUTCFullYear()}-${fmt(d.getUTCMonth() + 1)}-${fmt(d.getUTCDate())}`
-  clockDate.textContent = realtime ? `${date} UTC · synced to earth` : `${date} UTC · simulated`
-}
-setInterval(tickClock, 200)
-
-/* ---------------- NEO panel ---------------- */
-
-const neoToggle = document.getElementById('neo-toggle')
-const neoBody = document.getElementById('neo-body')
-const neoList = document.getElementById('neo-list')
-const neoStatus = document.getElementById('neo-status')
-const neoCount = document.getElementById('neo-count')
-
-neoToggle.addEventListener('click', () => {
-  neoBody.style.display = neoBody.style.display === 'none' ? '' : 'none'
 })
 
-function fetchNEO() {
-  neoStatus.textContent = 'contacting nasa…'
-  neoList.innerHTML = ''
-  const url = `https://api.nasa.gov/neo/rest/v1/feed/today?detailed=false${API_KEY ? `&api_key=${API_KEY}` : ''}`
-  fetch(url)
-    .then((r) => {
-      if (!r.ok) throw new Error(`HTTP ${r.status}`)
-      return r.json()
-    })
-    .then((data) => {
-      const objects = Object.values(data.near_earth_objects).flat().sort((a, b) => {
-        const ad = +a.close_approach_data[0].miss_distance.kilometers
-        const bd = +b.close_approach_data[0].miss_distance.kilometers
-        return ad - bd
-      })
-      neoCount.textContent = objects.length
-      neoStatus.textContent = ''
-      objects.forEach((o) => {
-        const cad = o.close_approach_data[0]
-        const km = (+cad.miss_distance.kilometers).toLocaleString('en-US', { maximumFractionDigits: 0 })
-        const ld = (+cad.miss_distance.lunar).toFixed(0)
-        const v = (+cad.relative_velocity.kilometers_per_second).toFixed(1)
-        const sizeMin = o.estimated_diameter.meters.estimated_diameter_min.toFixed(0)
-        const sizeMax = o.estimated_diameter.meters.estimated_diameter_max.toFixed(0)
-        const li = document.createElement('li')
-        li.className = 'neo-item'
-        li.title = 'open on JPL small-body database'
-        li.addEventListener('click', () => window.open(o.nasa_jpl_url, '_blank'))
-        li.innerHTML = `
-          <span class="neo-hazard ${o.is_potentially_hazardous_asteroid}"></span>
-          <div>
-            <div class="neo-name">${escapeHtml(o.name)}</div>
-            <div class="neo-meta">${sizeMin}–${sizeMax} m · ${v} km/s</div>
-          </div>
-          <div class="neo-dist">${ld} LD<small>${km} km</small></div>
-        `
-        neoList.appendChild(li)
-      })
-    })
-    .catch(() => {
-      neoCount.textContent = '—'
-      neoStatus.innerHTML =
-        'can\u2019t reach nasa right now. <button class="retry">retry</button>'
-      neoStatus.querySelector('.retry').addEventListener('click', fetchNEO)
-    })
-}
+panel.querySelectorAll('.toggle-row').forEach((row) => {
+  row.addEventListener('click', () => {
+    const key = row.dataset.key
+    if (key === 'wind') showWind = !showWind
+    if (key === 'particles') showParticles = !showParticles
+    if (key === 'grid') showGrid = !showGrid
+    if (key === 'trails') trails = !trails
+    row.querySelector('.state').textContent = key === 'wind' ? (showWind ? 'on' : 'off') : key === 'particles' ? (showParticles ? 'on' : 'off') : key === 'grid' ? (showGrid ? 'on' : 'off') : (trails ? 'on' : 'off')
+  })
+})
 
-function escapeHtml(s) {
-  const d = document.createElement('div')
-  d.textContent = s
-  return d.innerHTML
-}
+document.getElementById('opt-opacity').addEventListener('input', (e) => { opacity = +e.target.value })
+document.getElementById('opt-vel').addEventListener('input', (e) => { velScale = +e.target.value })
+document.getElementById('opt-count').addEventListener('input', (e) => {
+  count = +e.target.value
+  rebuildParticles(count)
+})
 
-fetchNEO()
+const clockEl = document.getElementById('clock')
+setInterval(() => {
+  clockEl.textContent = new Date().toISOString().slice(0, 19).replace('T', ' ') + ' UTC'
+}, 1000)
 
-/* ---------------- animation ---------------- */
+/* ---------------- pan / zoom ---------------- */
 
-const clock3d = new THREE.Clock()
-const sunDir = new THREE.Vector3()
+let dragging = false
+let lastX = 0
+let lastY = 0
 
-function animate() {
-  requestAnimationFrame(animate)
-  const delta = Math.min(clock3d.getDelta(), 0.05)
+canvas.addEventListener('pointerdown', (e) => {
+  dragging = true
+  canvas.classList.add('dragging')
+  lastX = e.clientX
+  lastY = e.clientY
+  canvas.setPointerCapture(e.pointerId)
+})
 
-  if (!paused) simTime += delta * simSpeed
-  if (realtime) simTime = Date.now() / 1000
+canvas.addEventListener('pointermove', (e) => {
+  if (!dragging) return
+  view.panX += e.clientX - lastX
+  view.panY += e.clientY - lastY
+  lastX = e.clientX
+  lastY = e.clientY
+  dirty = true
+})
 
-  const oa = orbitAngle()
-  const earthPos = new THREE.Vector3(Math.cos(oa) * ORBIT_R, 0, Math.sin(oa) * ORBIT_R)
-  earthGroup.position.copy(earthPos)
-  controls.target.copy(earthPos)
+canvas.addEventListener('pointerup', () => {
+  dragging = false
+  canvas.classList.remove('dragging')
+})
 
-  earthTilt.rotation.y = simTime / 86164 * Math.PI * 2 + oa
-  clouds.rotation.y = earthTilt.rotation.y * 1.12 + 0.2
+canvas.addEventListener('wheel', (e) => {
+  e.preventDefault()
+  const nz = Math.min(12, Math.max(0.5, view.zoom * Math.exp(-e.deltaY * 0.0012)))
+  const wx = (e.clientX - (W / 2 + view.panX)) / view.zoom + view.cx
+  const wy = (e.clientY - (H / 2 + view.panY)) / view.zoom + view.cy
+  view.zoom = nz
+  view.cx = wx - (e.clientX - (W / 2 + view.panX)) / nz
+  view.cy = wy - (e.clientY - (H / 2 + view.panY)) / nz
+  dirty = true
+}, { passive: false })
 
-  const ma = (simTime / (27.32 * 86400)) * Math.PI * 2
-  moon.position.set(Math.cos(ma) * 2.6, 0, Math.sin(ma) * 2.6)
+canvas.addEventListener('dblclick', resetView)
 
-  sunDir.copy(earthPos).multiplyScalar(-1).normalize()
-  earth.material.uniforms.sunDirection.value.copy(sunDir)
-  atmosphere.material.uniforms.sunDirection.value.copy(sunDir)
-  clouds.material.uniforms = clouds.material.uniforms || {}
+/* ---------------- render loop ---------------- */
 
-  sunGlow.material.rotation += delta * 0.02
+let last = performance.now()
 
-  controls.update()
-  renderer.render(scene, camera)
-  if (!dbg.frameLogged) {
-    dbg.frameLogged = true
-    dbg(`scene ok — ${renderer.info.render.calls} draw calls, ${renderer.info.render.triangles} triangles, ${renderer.getContext().constructor.name}`)
+function frame(now) {
+  requestAnimationFrame(frame)
+  let dt = Math.min((now - last) / 1000, 0.05)
+  last = now
+  if (paused) dt = 0
+
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+  ctx.fillStyle = '#01060c'
+  ctx.fillRect(0, 0, W, H)
+  applyView()
+
+  if (mapReady) {
+    if (trails && !dirty) {
+      ctx.fillStyle = 'rgba(1,6,12,0.07)'
+      ctx.fillRect(0, 0, WBASE, WBASE)
+    } else {
+      ctx.drawImage(mapCanvas, 0, 0)
+      dirty = false
+    }
+  }
+
+  if (showGrid) {
+    ctx.fillStyle = 'rgba(120,170,210,0.28)'
+    for (let j = 0; j < NY; j++) {
+      for (let i = 0; i < NX; i++) {
+        ctx.fillRect(mercX(-180 + (i + 0.5) * (360 / NX)), mercY(90 - (j + 0.5) * (180 / NY)), 1, 1)
+      }
+    }
+  }
+
+  if (showWind && mapReady && !paused && dt > 0) {
+    const k = K * velScale
+    const inv = 1 / 111320
+    const pxPerDeg = WBASE / 360
+    ctx.lineWidth = Math.max(0.5, 1 / view.zoom)
+    ctx.lineCap = 'round'
+    for (const p of PARTICLES) {
+      p.age++
+      if (p.age > 320 || p.y < 4 || p.y > WBASE - 4) {
+        Object.assign(p, makeParticle())
+        continue
+      }
+      const lon = invLon(p.x)
+      const lat = invLat(p.y)
+      const u = sampleWind(lon, lat, true)
+      const v = sampleWind(lon, lat, false)
+      const spd = Math.hypot(u, v)
+      const cosl = Math.max(Math.cos((lat * Math.PI) / 180), 0.08)
+      let nx = p.x + (u * k * inv * dt / cosl) * pxPerDeg
+      const ny = p.y + (v * k * inv * dt) * pxPerDeg
+      if (nx < 0) nx += WBASE
+      if (nx > WBASE) nx -= WBASE
+      if (offScreen(nx, ny) && offScreen(p.x, p.y)) {
+        Object.assign(p, makeParticle())
+        continue
+      }
+      if (showParticles) {
+        ctx.globalAlpha = Math.max(0.08, 1 - p.age / 320) * opacity
+        ctx.strokeStyle = speedColor(spd)
+        ctx.beginPath()
+        ctx.moveTo(p.x, p.y)
+        ctx.lineTo(nx, ny)
+        ctx.stroke()
+      }
+      p.x = nx
+      p.y = ny
+    }
+    ctx.globalAlpha = 1
   }
 }
 
-/* ---------------- resize / hint ---------------- */
-
-window.addEventListener('resize', () => {
-  camera.aspect = window.innerWidth / window.innerHeight
-  camera.updateProjectionMatrix()
-  renderer.setSize(window.innerWidth, window.innerHeight)
-})
-
-setTimeout(() => document.getElementById('hint').classList.add('hidden'), 9000)
-
-if ('ontouchstart' in window) {
-  document.getElementById('hint').textContent = 'drag to orbit · pinch to zoom'
-}
-
-tickClock()
-setSpeed(2)
+rebuildParticles(count)
+requestAnimationFrame(frame)

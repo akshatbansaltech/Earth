@@ -6,80 +6,61 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       name="description"
-      content="EARTH — a live 3D model of Earth orbiting the Sun, synced to real time, with NASA near-earth object data."
+      content="earth — a live simulation of global wind, inspired by earth.nullschool.net"
     />
-    <title>EARTH — in Orbit</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap"
-      rel="stylesheet"
-    />
+    <title>earth — live simulation of global wind</title>
   </head>
   <body>
     <div id="app">
-      <canvas id="scene"></canvas>
+      <canvas id="map"></canvas>
 
       <div id="loader">
-        <div class="loader-brand">
-          <span class="loader-dot"></span>
-          EARTH
-        </div>
-        <div class="loader-bar"><div id="loader-fill"></div></div>
-        <div class="loader-sub" id="loader-status">loading earth…</div>
+        <div class="loader-brand"><span class="loader-dot"></span> earth</div>
+        <div class="loader-sub">loading map data…</div>
       </div>
 
       <header class="hud hud-top">
-        <div class="brand">
-          <div class="brand-name">EARTH</div>
-          <div class="brand-tag">in orbit · live</div>
-        </div>
-        <div class="clock">
-          <div class="clock-time" id="clock-time">--:--:--</div>
-          <div class="clock-sub" id="clock-date">—</div>
-        </div>
+        <div class="brand">earth</div>
+        <div class="clock" id="clock">—</div>
       </header>
 
-      <aside class="panel neo" id="neo-panel">
-        <button class="panel-head" id="neo-toggle">
-          <span class="panel-title">
-            <span class="dot dot-blue"></span>
-            near earth objects
-          </span>
-          <span class="neo-count" id="neo-count">…</span>
-        </button>
-        <div class="panel-body" id="neo-body">
-          <div class="neo-status" id="neo-status">contacting nasa…</div>
-          <ul class="neo-list" id="neo-list"></ul>
+      <div class="hud hud-bottom">
+        <div class="credit">
+          live simulation of global wind
+          <span class="dim">· textures NASA</span>
         </div>
-      </aside>
+        <div class="controls">
+          <button id="btn-pause" title="pause">⏸</button>
+          <button id="btn-menu" title="menu">☰</button>
+        </div>
+      </div>
 
-      <aside class="panel dock">
-        <div class="dock-row">
-          <label class="dock-label" for="speed">time scale</label>
-          <input type="range" id="speed" min="0" max="5" step="1" value="2" />
-          <span class="dock-value" id="speed-label">3600×</span>
+      <nav class="panel" id="panel" hidden>
+        <div class="panel-head" data-sec="sec-earth">earth<span class="chev">▸</span></div>
+        <div class="panel-sec" id="sec-earth">
+          <ul>
+            <li class="row"><span>wind</span><span class="dim">synthetic</span></li>
+          </ul>
         </div>
-        <div class="dock-row dock-presets" id="presets">
-          <button data-speed="-1" title="pause">⏸</button>
-          <button data-speed="0">1×</button>
-          <button data-speed="1">60×</button>
-          <button data-speed="2">1d/min</button>
-          <button data-speed="3">1d/s</button>
-          <button data-speed="4">1mo/s</button>
+        <div class="panel-head" data-sec="sec-overlays">overlays<span class="chev">▸</span></div>
+        <div class="panel-sec" id="sec-overlays">
+          <ul>
+            <li class="row toggle-row" data-key="wind"><span>wind</span><span class="state">on</span></li>
+            <li class="row toggle-row" data-key="particles"><span>particles</span><span class="state">on</span></li>
+            <li class="row toggle-row" data-key="grid"><span>wind grid</span><span class="state">off</span></li>
+            <li class="row toggle-row" data-key="trails"><span>streak trails</span><span class="state">on</span></li>
+          </ul>
         </div>
-        <div class="dock-row dock-toggles">
-          <button class="toggle on" id="t-realtime" title="sync earth's rotation to real time">sync</button>
-          <button class="toggle on" id="t-clouds">clouds</button>
-          <button class="toggle on" id="t-night">night lights</button>
-          <button class="toggle on" id="t-moon">moon</button>
-          <button class="toggle on" id="t-orbit">orbit</button>
-          <button class="toggle on" id="t-stars">stars</button>
+        <div class="panel-head" data-sec="sec-wind">wind<span class="chev">▸</span></div>
+        <div class="panel-sec" id="sec-wind">
+          <ul>
+            <li class="row"><span>opacity</span><input type="range" id="opt-opacity" min="0" max="1" step="0.05" value="1" /></li>
+            <li class="row"><span>velocity scale</span><input type="range" id="opt-vel" min="0.25" max="3" step="0.05" value="1" /></li>
+            <li class="row"><span>particles</span><input type="range" id="opt-count" min="1000" max="12000" step="250" value="5000" /></li>
+          </ul>
         </div>
-      </aside>
-
-      <div class="hint" id="hint">drag to orbit · scroll to zoom</div>
-      <footer class="credit">textures & data · NASA</footer>
+        <div class="panel-foot">drag to pan · scroll to zoom · double-click to reset</div>
+      </nav>
     </div>
     <script type="module" src="/src/main.js"></script>
   </body>
